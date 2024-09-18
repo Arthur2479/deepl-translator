@@ -1,58 +1,67 @@
+import json
+from pprint import pprint
+
 import requests
+from bs4 import BeautifulSoup
+
+# URL of the website you want to query
+URL = "https://www.wordreference.com/"
+FILE_PATH = "words_en.json"
+OUTPUT_FILE_PATH = "flashcards.txt"
 
 
-def load_api_key(file_path):
-    """Load the DeepL API key from a file."""
-    try:
-        with open(file_path, 'r') as file:
-            api_key = file.read().strip()
-        return api_key
-    except FileNotFoundError:
-        print(f"Error: File '{file_path}' not found.")
-        return None
+def main(word_to_test: str, dictionnary: str = 'enfr'):
+    response = requests.get(URL + dictionnary + '/' + word_to_test)
 
-
-def translate_text(text, target_language, api_key):
-    """Translate text using the DeepL API."""
-    url = 'https://api-free.deepl.com/v2/translate'
-    headers = {
-        'Authorization': f'DeepL-Auth-Key {api_key}',
-    }
-    data = {
-        'text': text,
-        'target_lang': target_language,
-        'formality': 'default'
-    }
-    response = requests.post(url, headers=headers, data=data)
-
-    if response.status_code == 200:
-        result = response.json()
-        return result
-    else:
-        print(f"Error: {response.status_code}, {response.text}")
-        return None
-
-
-def main():
-    api_key_file = 'api_key_deepl.txt'  # Path to the file containing the API key
-    api_key = load_api_key(api_key_file)
-
-    if api_key is None:
+    if response.status_code != 200:
+        print(f"Failed to retrieve the webpage. Status code: {response.status_code}")
         return
 
-    # Text to translate
-    text = "run"
+    page_content = response.text
 
-    # Target language, e.g., 'DE' for German, 'FR' for French, etc.
-    target_language = 'FR'
+    # Parse the HTML with BeautifulSoup and find the translation table
+    soup = BeautifulSoup(page_content, 'html.parser')
+    links = soup.find_all('table', class_='WRD')
 
-    # Translate the text
-    translated_text = translate_text(text, target_language, api_key)
+    # Make sure we are iterating on the wanted table
+    assert (links[0].find('tr').find('td').get_text(strip=True) == "Principales traductions")
 
-    if translated_text:
-        print(f"Original text: {text}")
-        print(f"Translated text: {translated_text}")
+    lines = links[0].find_all('tr')
+
+    translations = []
+    for line in lines[2:]:
+        # If new meaning is found, create a new line
+        if not line.get('id'):
+            # print(f"\nEMPTY ID ! : {line.get('id')}")
+            continue
+
+        translation_element = line.find_all('td')[-1]
+        # Filter unwanted elements such as examples
+        if translation_element.get('class')[0] != 'ToWrd':
+            translation_element.decompose()
+            continue
+
+        # Filter unwanted elements such as word type
+        if translation_element.find_all('em'):
+            [element.decompose() for element in translation_element.find_all('em')]
+
+        if translation_element.find_all('a'):
+            [element.decompose() for element in translation_element.find_all('a')]
+
+        if translation_element.find_all('span'):  # TODO : keep spans with [qqn] for eg
+            [element.decompose() for element in translation_element.find_all('span')]
+
+        translations.append(translation_element.get_text().strip())
+
+    return word_to_test, set(translations)  # Remove duplicates
 
 
 if __name__ == "__main__":
-    main()
+    with open(FILE_PATH, 'r') as json_file:
+        words = json.load(json_file)
+
+    with open(OUTPUT_FILE_PATH, 'a', encoding='utf-8') as output_file:
+        for word in words:
+            flashcard = main(word)
+            print(f'{flashcard[0]}\t{", ".join(flashcard[1])}', file=output_file)
+            print(f'{flashcard[0]}\t{", ".join(flashcard[1])}')
